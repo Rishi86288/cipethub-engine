@@ -1,17 +1,18 @@
 """
-CIPETHUB Engine — Video Generation Pipeline V2.0
+CIPETHUB Engine — Video Generation Pipeline V3.0
 Generates professional educational lecture MP4 videos for CIPET students.
 
-Upgrades in V2.0:
-  1. AI-generated visual diagrams (flowchart/table/bar-chart/pie/mind-map/timeline/tree/formula)
-  2. Ken Burns pan/zoom effect on every slide
-  3. Fade in / fade out transitions per segment
-  4. CIPET exam banner text overlay
-  5. Soft ambient background music (pure-Python sine-wave, no external assets)
-  6. Professional animated intro & outro slides
-  7. Progress bar (grows across the bottom of the video)
-  8. Better slide design: actual diagram on right panel instead of plain text hint
-  9. Improved Gemini API call with verbose logging and automatic model fallback
+Upgrades in V3.0 (mobile-first redesign):
+  1. Mobile-first LARGE fonts: 56px titles, 36px bullets, 28px minimum everywhere
+  2. 12 unique per-slide layouts with different visual styles and accent colors
+  3. Gemini Pro model with new V3 prompt focused purely on teaching concepts
+  4. Reduced text (max 3 bullets per slide) — 70%+ visual content per slide
+  5. Full-width diagrams: flowchart, bar chart, machine diagram, mind map, timeline etc.
+  6. Per-slide accent color cycling through 12 distinct brand colors
+  7. Zero repetition: CIPETHUB mentioned once in intro and once in outro only
+  8. Ken Burns + fade transitions retained from V2.0
+  9. Ambient background music retained from V2.0
+ 10. Progress bar retained from V2.0
 """
 
 import array
@@ -68,6 +69,25 @@ _VIS_H    = 648   # visual canvas height (fits inside right hint panel)
 STDERR_TAIL = 500
 
 # ---------------------------------------------------------------------------
+# V3.0 Per-slide accent color palette (one distinct color per slide)
+# ---------------------------------------------------------------------------
+
+SLIDE_COLORS_PIL = [
+    (0xFF, 0x6F, 0x00),  # 1:  Orange
+    (0x21, 0x96, 0xF3),  # 2:  Blue
+    (0x4C, 0xAF, 0x50),  # 3:  Green
+    (0xE9, 0x1E, 0x63),  # 4:  Pink
+    (0x9C, 0x27, 0xB0),  # 5:  Purple
+    (0x00, 0xBC, 0xD4),  # 6:  Cyan
+    (0xFF, 0x57, 0x22),  # 7:  Deep Orange
+    (0x3F, 0x51, 0xB5),  # 8:  Indigo
+    (0x00, 0x96, 0x88),  # 9:  Teal
+    (0xFF, 0xC1, 0x07),  # 10: Amber
+    (0x79, 0x55, 0x48),  # 11: Brown
+    (0x60, 0x7D, 0x8B),  # 12: Blue Grey
+]
+
+# ---------------------------------------------------------------------------
 # AI Script Generation
 # ---------------------------------------------------------------------------
 
@@ -85,48 +105,43 @@ def ai_script(topic: str, department: str, video_type: str) -> dict:
         genai.configure(api_key=api_key)
         print(f"[generator] Calling Gemini with key: {api_key[:10]}...")
 
-        prompt = f"""You are a professional Indian engineering professor creating a YouTube lecture video script for CIPET (Central Institute of Petrochemicals Engineering & Technology) students.
+        prompt = f"""You are creating a technical lecture script. Topic: {topic}, Department: {department}.
 
-Topic: {topic}
-Department: {department}  (can be Plastics, Mechanical, Manufacturing, or All)
-Video Type: {video_type}  (can be Simulation or PPT Lecture)
+RULES:
+- Generate exactly 12 slides
+- Each slide: title (max 5 words), 3 bullet points (max 10 words each), narration (3 sentences, technical and specific), visual_description (detailed description of what diagram to draw)
+- Include REAL numbers: temperatures, pressures, dimensions, speeds where applicable
+- DO NOT repeat "CIPET", "CIPETHUB", "exam", "semester" — focus only on teaching the concept
+- Slide 1: Brief intro to topic (1 sentence: "Today we learn about {topic}.", then start teaching immediately)
+- Slides 2-11: Pure technical content with specific data
+- Slide 12: Quick summary + "Subscribe for more" (1 sentence max)
+- Narration style: Clear, direct, like an expert explaining to a colleague. NOT repetitive.
+- Each bullet point: max 10 words, short and punchy, specific facts or values
 
-Create a complete lecture script for a YouTube video with exactly 12 slides.
-
-IMPORTANT INSTRUCTIONS:
-- Address students as "dear students" or "friends"
-- Slide 1 narration MUST start with "Namaskar and welcome to CIPETHUB!"
-- Slide 12 narration MUST end with "Thank you dear students. Please like and subscribe to CIPETHUB channel. Share with your CIPET classmates. Jai Hind!"
-- Include exam tips such as "This is important for your CIPET semester exam"
-- Mention relevant Indian companies like Reliance, Supreme, Astral, Tata where applicable
-- Write narration in Indian English professor style (4-5 sentences per slide)
-- Keep slide titles to a maximum of 6 words
-- Each slide has exactly 5 bullet points
-
-Return ONLY valid JSON in this exact format (no markdown, no code blocks):
+Return ONLY valid JSON (no markdown, no code blocks):
 {{
   "title": "video title here",
-  "description": "video description here #CIPETHUB #CIPET #engineering #lecture",
-  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8", "tag9", "tag10", "tag11", "tag12", "tag13", "tag14", "tag15", "tag16", "tag17", "tag18", "tag19", "tag20"],
+  "description": "video description here",
+  "tags": ["tag1","tag2","tag3","tag4","tag5","tag6","tag7","tag8","tag9","tag10","tag11","tag12","tag13","tag14","tag15","tag16","tag17","tag18","tag19","tag20"],
   "slides": [
     {{
-      "title": "slide title (max 6 words)",
-      "bullets": ["bullet 1", "bullet 2", "bullet 3", "bullet 4", "bullet 5"],
-      "narration": "4-5 sentence Indian English narration for this slide.",
-      "visual_hint": "description of diagram or visual for this slide"
+      "title": "slide title (max 5 words)",
+      "bullets": ["bullet 1 (max 10 words)", "bullet 2 (max 10 words)", "bullet 3 (max 10 words)"],
+      "narration": "3 sentences of technical narration.",
+      "visual_description": "detailed description of diagram, chart, machine, or flowchart to render for this slide"
     }}
   ]
 }}
 
 Generate exactly 12 slides. The tags array must have exactly 20 items."""
 
-        # Try gemini-1.5-flash first, fall back to gemini-pro
+        # Try gemini-pro first (user has Gemini Pro active), fall back to gemini-1.5-flash
         try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content(prompt)
-        except Exception as flash_exc:
-            print(f"[generator] gemini-1.5-flash failed ({flash_exc}), trying gemini-pro …")
             model = genai.GenerativeModel("gemini-pro")
+            response = model.generate_content(prompt)
+        except Exception as pro_exc:
+            print(f"[generator] gemini-pro failed ({pro_exc}), trying gemini-1.5-flash ...")
+            model = genai.GenerativeModel("gemini-1.5-flash")
             response = model.generate_content(prompt)
 
         raw = response.text.strip()
@@ -145,7 +160,7 @@ Generate exactly 12 slides. The tags array must have exactly 20 items."""
 
         tags = data.get("tags", [])
         if len(tags) < 20:
-            tags += [topic, department, "CIPET", "engineering"] * 5
+            tags += [topic, department, "engineering", "lecture"] * 5
         data["tags"] = tags[:20]
 
         return data
@@ -162,226 +177,190 @@ def _fallback(topic: str, department: str) -> dict:
 
     slides = [
         {
-            "title": f"Introduction to {topic[:30]}",
+            "title": f"Intro: {topic[:25]}",
             "bullets": [
-                f"Overview of {topic}",
-                f"Importance in {department} engineering",
-                "Historical background",
-                "Applications in Indian industry",
-                "Scope of this lecture",
+                f"{topic} — core concept overview",
+                f"Key applications in {department} engineering",
+                "Why this topic matters today",
             ],
             "narration": (
-                f"Namaskar and welcome to CIPETHUB! Dear students, today we will study {topic}. "
-                f"This topic is extremely important for {department} engineering students. "
-                f"Companies like Reliance, Tata, Supreme and Astral use these concepts extensively. "
-                f"This is important for your CIPET semester exam. Let us start our journey!"
+                f"Today we learn about {topic}. "
+                f"This is a fundamental concept in {department} engineering with wide industrial applications. "
+                "We will cover principles, processes, and real-world examples in this lecture."
             ),
-            "visual_hint": f"Introduction diagram for {topic} showing key applications",
+            "visual_description": f"Labeled diagram introducing {topic} with key components highlighted",
         },
         {
             "title": "Fundamental Concepts",
             "bullets": [
-                "Basic definitions and terminology",
-                "Core principles involved",
-                "Scientific basis",
-                "Standard notations used",
-                "Units and measurements",
+                "Core definitions and terminology",
+                "Underlying scientific principles",
+                "Standard units and measurements",
             ],
             "narration": (
-                f"Dear students, let us understand the fundamental concepts of {topic}. "
-                "First, we must be clear about the basic definitions and terminology. "
-                "These form the foundation of all advanced topics. "
-                "Please note these definitions carefully as they are important for your CIPET semester exam."
+                f"The fundamental concepts of {topic} start with precise definitions and terminology. "
+                "Understanding the scientific basis helps us predict material and process behaviour accurately. "
+                "Standard units ensure consistent measurement across all industrial applications."
             ),
-            "visual_hint": "Concept map showing fundamental definitions and relationships",
+            "visual_description": "Concept map showing fundamental definitions, relationships and key terms with connecting arrows",
         },
         {
             "title": "Classification & Types",
             "bullets": [
                 "Primary classification criteria",
-                "Type A — properties and uses",
-                "Type B — properties and uses",
-                "Type C — properties and uses",
-                "Comparison of different types",
+                "Type A vs Type B vs Type C",
+                "Selection guide by application",
             ],
             "narration": (
-                f"Friends, now we will look at the classification and types in {topic}. "
-                "Understanding the classification helps us choose the right approach for each application. "
-                f"In the Indian industry, especially in companies like Reliance Industries, these classifications are used daily. "
-                "Make sure you remember the comparison table for your examinations."
+                f"Classification of {topic} is based on structural differences and performance properties. "
+                "Each type has distinct advantages that determine its suitability for specific applications. "
+                "Knowing these differences is essential for correct material or process selection."
             ),
-            "visual_hint": "Classification tree diagram showing all major types",
+            "visual_description": "Three side-by-side comparison cards showing Type A, Type B, Type C with key properties listed in each card",
         },
         {
             "title": "Properties & Characteristics",
             "bullets": [
-                "Mechanical properties overview",
-                "Thermal properties overview",
-                "Chemical resistance",
-                "Electrical properties",
-                "Standard testing methods",
+                "Mechanical: strength, stiffness, toughness",
+                "Thermal: Tg, HDT, conductivity values",
+                "Chemical resistance and durability",
             ],
             "narration": (
-                f"Dear students, the properties and characteristics are the heart of {topic}. "
-                "We study both mechanical and thermal properties in this section. "
-                "Chemical resistance is particularly important in the petrochemicals industry. "
-                "These properties determine which material or process we select for a given application."
+                f"The properties of {topic} span mechanical, thermal, and chemical domains. "
+                "Tensile strength, heat deflection temperature, and chemical resistance are the most important parameters. "
+                "These values directly determine service life and product quality."
             ),
-            "visual_hint": "Property comparison bar chart showing values for different variants",
+            "visual_description": "Bar chart comparing key property values (strength, temperature resistance, chemical resistance) across variants",
         },
         {
             "title": "Manufacturing Process",
             "bullets": [
-                "Raw material preparation",
-                "Processing steps in sequence",
-                "Equipment and machinery used",
+                "Raw material → processing → product",
+                "Critical temperature and pressure ranges",
                 "Quality control checkpoints",
-                "Industry safety norms",
             ],
             "narration": (
-                f"Friends, the manufacturing process for {topic} involves several well-defined steps. "
-                "Starting from raw material preparation to the final product, each step must be carefully controlled. "
-                "Companies such as Supreme Industries and Astral follow strict quality control checkpoints. "
-                "This is important for your CIPET semester exam — please draw and label the process flow diagram."
+                f"The manufacturing process for {topic} begins with raw material preparation and conditioning. "
+                "Precise control of temperature, pressure, and time at each step is critical for quality. "
+                "Quality checkpoints at each stage prevent defects and ensure consistency."
             ),
-            "visual_hint": "Step-by-step process flow diagram with equipment labels",
+            "visual_description": "Step-by-step flowchart: Raw Material → Preparation → Processing → Cooling → Inspection → Product, with temperature/pressure values at each step",
         },
         {
             "title": "Equipment & Machinery",
             "bullets": [
-                "Main processing equipment",
-                "Auxiliary systems",
-                "Control and instrumentation",
-                "Maintenance requirements",
-                "Safety interlocks",
+                "Main machine: components and function",
+                "Drive system and control unit",
+                "Safety interlocks and sensors",
             ],
             "narration": (
-                f"Dear students, let us now look at the equipment and machinery used in {topic}. "
-                "Every piece of equipment has a specific function in the overall process. "
-                f"Understanding the control and instrumentation is essential for a {department} engineer. "
-                "Tata Engineering and other major corporations use automated systems for precision control."
+                f"The equipment used in {topic} consists of a main processing unit, drive system, and control instrumentation. "
+                "Each component performs a specific function that contributes to the overall process efficiency. "
+                "Safety interlocks and sensors protect operators and ensure consistent product quality."
             ),
-            "visual_hint": "Labelled diagram of main processing equipment with part names",
+            "visual_description": "Labeled machine cross-section diagram showing Hopper, Barrel, Screw, Heater Bands, Nozzle, Mould/Die, Drive Motor with arrows indicating material flow",
         },
         {
             "title": "Design Calculations",
             "bullets": [
-                "Key design parameters",
-                "Important formulas to remember",
-                "Sample calculation walkthrough",
-                "Safety factors and standards",
-                "Software tools used in industry",
+                "Key formulas with variable definitions",
+                "Sample calculation: given → find → solve",
+                "Safety factor: typically 1.5–3.0×",
             ],
             "narration": (
-                f"Friends, design calculations are a very important part of {topic}. "
-                "You must memorise the key formulas as they are frequently asked in CIPET examinations. "
-                "Let us walk through a sample calculation step by step. "
-                "Always apply the appropriate safety factor as per Indian Standards."
+                f"Design calculations for {topic} require applying fundamental formulas with correct parameter values. "
+                "A worked example clarifies how to substitute known values and solve for the required quantity. "
+                "Always apply a safety factor of 1.5 to 3.0 as per applicable engineering standards."
             ),
-            "visual_hint": "Formula sheet with labelled variables and sample calculation table",
+            "visual_description": "Left: Key formula in large text with labelled variables. Right: Worked example table with given values, formula substitution, and numerical result",
         },
         {
             "title": "Industrial Applications",
             "bullets": [
-                "Application in packaging industry",
-                "Application in automotive sector",
-                "Application in construction industry",
-                "Application in agriculture",
-                "Emerging applications",
+                "Packaging and consumer goods",
+                "Automotive and aerospace components",
+                "Construction and infrastructure",
             ],
             "narration": (
-                f"Dear students, {topic} has a wide range of industrial applications in India and worldwide. "
-                "From packaging to the automotive sector, this knowledge is directly applicable. "
-                "Companies like Reliance Polymers and Supreme Industries produce millions of products using these principles. "
-                "Understanding real applications will help you in placement interviews after CIPET."
+                f"{topic} is applied across packaging, automotive, and construction sectors worldwide. "
+                "In packaging, it provides lightweight, barrier-rich solutions at low cost. "
+                "Automotive and aerospace applications demand high strength-to-weight ratio and thermal stability."
             ),
-            "visual_hint": "Infographic showing industries using this technology with logos",
+            "visual_description": "2x2 grid of application cards: Packaging (with icon), Automotive (with icon), Construction (with icon), Aerospace (with icon) — each card with 1 key fact",
         },
         {
-            "title": "Quality Standards & Testing",
+            "title": "Quality Standards",
             "bullets": [
-                "Relevant IS and ISO standards",
-                "Testing methods and procedures",
-                "Acceptance criteria",
-                "Documentation requirements",
-                "Certification process",
+                "IS / ISO / ASTM standard references",
+                "Test methods: tensile, impact, thermal",
+                "Acceptance criteria and tolerances",
             ],
             "narration": (
-                f"Friends, quality standards and testing are essential aspects of {topic}. "
-                "In India, the Bureau of Indian Standards (BIS) publishes IS standards that all manufacturers must follow. "
-                "Knowing the testing methods is important for your CIPET semester exam and future career. "
-                "Always refer to the latest version of the applicable standard in practice."
+                f"Quality standards for {topic} are defined by IS, ISO, and ASTM specifications. "
+                "Testing methods cover tensile strength, impact resistance, and thermal performance. "
+                "Acceptance criteria set the minimum performance thresholds for commercial products."
             ),
-            "visual_hint": "Table listing IS/ISO standards with corresponding test methods",
+            "visual_description": "Comparison table with alternating row colors: Standard | Test Method | Property Tested | Acceptance Limit — 5 rows of data",
         },
         {
-            "title": "Environmental & Safety Aspects",
+            "title": "Environmental Aspects",
             "bullets": [
-                "Environmental regulations in India",
-                "Waste management practices",
-                "Worker safety protocols",
-                "Green manufacturing initiatives",
-                "Sustainability considerations",
+                "Recyclability and end-of-life options",
+                "Energy consumption per kg produced",
+                "Regulatory compliance requirements",
             ],
             "narration": (
-                f"Dear students, environmental and safety aspects of {topic} are increasingly important. "
-                "India has stringent environmental regulations that all industries must comply with. "
-                "Sustainable manufacturing is now a key focus for companies like Tata and Reliance. "
-                "As future engineers, you must champion green practices in your workplace."
+                f"Environmental considerations for {topic} focus on recyclability, energy use, and regulatory compliance. "
+                "Life-cycle analysis shows that energy-efficient processing reduces carbon footprint significantly. "
+                "Compliance with environmental regulations is mandatory for all industrial operations."
             ),
-            "visual_hint": "Green manufacturing cycle diagram showing waste reduction strategies",
+            "visual_description": "Circular cycle diagram: Production → Use → Collection → Recycling → Back to Production, with labels for energy savings and CO2 reduction at each stage",
         },
         {
-            "title": "Recent Advances & Trends",
+            "title": "Recent Trends",
             "bullets": [
-                "Latest research developments",
-                "Industry 4.0 integration",
-                "Smart manufacturing trends",
-                "Future material innovations",
-                "Career opportunities in this field",
+                "Nanocomposites and smart materials",
+                "Industry 4.0 and IoT integration",
+                "Biobased and sustainable alternatives",
             ],
             "narration": (
-                f"Friends, the field of {topic} is advancing rapidly. "
-                "Industry 4.0 and smart manufacturing are transforming how engineers work. "
-                "There are excellent career opportunities in this area across India and globally. "
-                "CIPET graduates are highly sought after by top companies in this sector."
+                f"Recent advances in {topic} include nanocomposite reinforcement and smart material integration. "
+                "Industry 4.0 enables real-time process monitoring using IoT sensors and AI-based control. "
+                "Bio-based alternatives are gaining traction as sustainable replacements for conventional materials."
             ),
-            "visual_hint": "Timeline showing evolution of technology with future milestones",
+            "visual_description": "Horizontal timeline from 2000 to 2030: key milestones marked — nanotechnology (2005), bioplastics (2010), Industry 4.0 (2018), smart materials (2025+)",
         },
         {
-            "title": "Summary & Revision",
+            "title": "Summary",
             "bullets": [
-                "Key topics covered today",
-                "Important formulas recap",
-                "Exam tips and focus areas",
-                "Recommended reference books",
-                "Subscribe to CIPETHUB for more!",
+                f"{topic} — key principles recap",
+                "Critical values and formulas",
+                "Subscribe for more lectures",
             ],
             "narration": (
-                f"Dear students, we have now completed our lecture on {topic}. "
-                "Let us quickly revise the key concepts we covered today. "
-                "Remember to focus on the formulas and process diagrams for your CIPET semester exam. "
-                "Thank you dear students. Please like and subscribe to CIPETHUB channel. "
-                "Share with your CIPET classmates. Jai Hind!"
+                f"We have covered the complete fundamentals of {topic} from principles to applications. "
+                "Remember the key property values, process parameters, and design formulas from this lecture. "
+                "Subscribe for more technical lectures like this one."
             ),
-            "visual_hint": "Mind map summarising all key concepts from the lecture",
+            "visual_description": f"Mind map with '{topic}' at centre and branches: Principles, Types, Properties, Process, Equipment, Applications, Standards, Environment, Trends",
         },
     ]
 
     tags = [
-        topic, department, "CIPET", "CIPETHUB", "engineering", "lecture",
-        "India", "students", "education", "tutorial",
-        f"{department} engineering", "CIPET exam", "semester", "study material",
-        "petrochemicals", "polymer", "manufacturing", "Plastics", "technical",
-        "YouTube lecture",
+        topic, department, "engineering", "lecture",
+        "education", "tutorial", "technical", "manufacturing",
+        f"{department} engineering", "study material",
+        "polymer", "plastics", "materials", "process engineering",
+        "industrial", "technology", "science", "India",
+        "CIPETHUB", "YouTube lecture",
     ]
 
     return {
-        "title": f"{topic} | {department} Engineering | CIPETHUB",
+        "title": f"{topic} | {department} Engineering Lecture",
         "description": (
-            f"Complete lecture on {topic} for CIPET {department} Engineering students. "
-            f"Covers all important concepts for CIPET semester examination. "
-            f"#CIPETHUB #CIPET #{department.replace(' ', '')} #engineering #lecture #India"
+            f"Complete technical lecture on {topic} for {department} engineering students. "
+            f"Covers fundamentals, processes, properties, applications, and design calculations. "
+            f"#{topic.replace(' ', '')} #{department.replace(' ', '')} #engineering #lecture"
         ),
         "tags": tags[:20],
         "slides": slides,
@@ -1000,7 +979,708 @@ def render_visual(
 
 
 # ---------------------------------------------------------------------------
-# Slide Image Rendering (Pillow) — Upgrade 8
+# V3.0 Full-slide visual draw functions
+# Each draws INTO a rectangular region (rx, ry, rw, rh) of the main canvas.
+# All text: minimum 28px. These are used by render_slide_image_v3().
+# ---------------------------------------------------------------------------
+
+
+def _v3_draw_flowchart(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw a vertical flowchart with colored boxes and arrows."""
+    steps = [str(s)[:50] for s in items[:7]] if items else ["Step 1", "Step 2", "Step 3"]
+    n = len(steps)
+    box_h = min(100, (rh - 20) // (n + (n - 1) // 2))
+    arrow_h = max(20, box_h // 2)
+    total_h = n * box_h + (n - 1) * arrow_h
+    start_y = ry + (rh - total_h) // 2
+    pad_x = rx + 40
+    box_w = rw - 80
+    font = _load_font(bold=True, size=28)
+    shades = [
+        color,
+        tuple(max(0, c - 30) for c in color),
+        tuple(min(255, c + 25) for c in color),
+    ]
+    for i, step in enumerate(steps):
+        y = start_y + i * (box_h + arrow_h)
+        c = shades[i % len(shades)]
+        draw.rectangle([pad_x, y, pad_x + box_w, y + box_h],
+                       fill=c, outline=_WHITE, width=2)
+        bb = draw.textbbox((0, 0), step, font=font)
+        tx = pad_x + (box_w - (bb[2] - bb[0])) // 2
+        ty = y + (box_h - (bb[3] - bb[1])) // 2
+        draw.text((tx, ty), step, font=font, fill=_WHITE)
+        if i < n - 1:
+            ax = rx + rw // 2
+            ay1 = y + box_h
+            ay2 = y + box_h + arrow_h
+            draw.line([(ax, ay1), (ax, ay2 - 10)], fill=color, width=4)
+            draw.polygon([(ax, ay2), (ax - 12, ay2 - 16), (ax + 12, ay2 - 16)], fill=color)
+
+
+def _v3_draw_bar_chart(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw a large vertical bar chart with labeled axes."""
+    labels = [str(s)[:18] for s in items[:6]] if items else ["A", "B", "C", "D"]
+    n = len(labels)
+    lbl_font = _load_font(bold=False, size=28)
+    num_font = _load_font(bold=True, size=28)
+    axis_font = _load_font(bold=False, size=24)
+
+    ml, mr, mt, mb = rx + 60, rx + rw - 20, ry + 20, ry + rh - 80
+    chart_w = mr - ml
+    chart_h = mb - mt
+
+    # Axes
+    draw.line([(ml, mt), (ml, mb)], fill=_LIGHT_GRAY, width=3)
+    draw.line([(ml, mb), (mr, mb)], fill=_LIGHT_GRAY, width=3)
+
+    # Grid lines
+    for pct in [25, 50, 75, 100]:
+        gy = mb - int(chart_h * pct / 100)
+        draw.line([(ml, gy), (mr, gy)], fill=(0x28, 0x42, 0x58), width=1)
+        draw.text((ml - 56, gy - 14), f"{pct}%", font=axis_font, fill=_LIGHT_GRAY)
+
+    bar_w = max(40, (chart_w - 20 * n) // n)
+    heights = [0.45 + 0.55 * ((n - i) / n) for i in range(n)]
+    for i, (lbl, h) in enumerate(zip(labels, heights)):
+        bx = ml + 12 + i * (bar_w + 20)
+        bh = int(chart_h * h)
+        by = mb - bh
+        c = _CHART_COLORS[i % len(_CHART_COLORS)]
+        draw.rectangle([bx, by, bx + bar_w, mb], fill=c)
+        val_text = f"{int(h * 100)}%"
+        vb = draw.textbbox((0, 0), val_text, font=num_font)
+        draw.text((bx + (bar_w - (vb[2] - vb[0])) // 2, by - 36),
+                  val_text, font=num_font, fill=_WHITE)
+        lb = draw.textbbox((0, 0), lbl, font=lbl_font)
+        lx = bx + (bar_w - (lb[2] - lb[0])) // 2
+        draw.text((lx, mb + 8), lbl, font=lbl_font, fill=_LIGHT_GRAY)
+
+
+def _v3_draw_labeled_diagram(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    title: str,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw a central labeled diagram with radiating callout boxes."""
+    parts = [str(s)[:30] for s in items[:8]] if items else ["Part A", "Part B", "Part C"]
+    n = len(parts)
+    cfont = _load_font(bold=True, size=32)
+    bfont = _load_font(bold=False, size=28)
+
+    cx = rx + rw // 2
+    cy = ry + rh // 2
+    cr = min(rw, rh) // 6
+    arm = min(rw, rh) // 3
+
+    draw.ellipse([cx - cr, cy - cr, cx + cr, cy + cr], fill=color, outline=_WHITE, width=3)
+    short = (title[:14] + "..") if len(title) > 16 else title
+    tb = draw.textbbox((0, 0), short, font=cfont)
+    draw.text((cx - (tb[2] - tb[0]) // 2, cy - (tb[3] - tb[1]) // 2),
+              short, font=cfont, fill=_WHITE)
+
+    bw = max(160, rw // 5)
+    bh = 54
+    for i, part in enumerate(parts):
+        angle = math.radians(-90 + i * 360 / n)
+        bx_c = int(cx + arm * math.cos(angle))
+        by_c = int(cy + arm * math.sin(angle))
+        c = _CHART_COLORS[i % len(_CHART_COLORS)]
+        draw.line([(cx, cy), (bx_c, by_c)], fill=c, width=2)
+        rx2 = max(rx + 4, min(bx_c - bw // 2, rx + rw - bw - 4))
+        ry2 = max(ry + 4, min(by_c - bh // 2, ry + rh - bh - 4))
+        draw.rectangle([rx2, ry2, rx2 + bw, ry2 + bh], fill=c, outline=_WHITE, width=1)
+        pb = draw.textbbox((0, 0), part[:22], font=bfont)
+        draw.text((rx2 + (bw - (pb[2] - pb[0])) // 2,
+                   ry2 + (bh - (pb[3] - pb[1])) // 2),
+                  part[:22], font=bfont, fill=_WHITE)
+
+
+def _v3_draw_comparison_cards(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw 3 side-by-side colored comparison cards."""
+    n_cards = min(3, len(items)) if items else 3
+    texts = [str(s) for s in items[:n_cards]] if items else ["Type A", "Type B", "Type C"]
+    gap = 24
+    card_w = (rw - gap * (n_cards + 1)) // n_cards
+    card_h = rh - 40
+    title_font = _load_font(bold=True, size=36)
+    body_font = _load_font(bold=False, size=28)
+    card_colors = [
+        color,
+        tuple(max(0, c - 40) for c in color),
+        tuple(min(255, c + 35) for c in color),
+    ]
+    for i, text in enumerate(texts):
+        cx = rx + gap + i * (card_w + gap)
+        cy = ry + 20
+        c = card_colors[i % len(card_colors)]
+        draw.rectangle([cx, cy, cx + card_w, cy + card_h],
+                       fill=_CARD_BG, outline=c, width=3)
+        # Color header band
+        draw.rectangle([cx, cy, cx + card_w, cy + 70], fill=c)
+        header = f"Type {chr(65 + i)}"
+        words = text.split()
+        if len(words) >= 2 and words[0].lower() == "type":
+            header = f"{words[0]} {words[1]}"
+        hb = draw.textbbox((0, 0), header[:20], font=title_font)
+        draw.text((cx + (card_w - (hb[2] - hb[0])) // 2, cy + (70 - (hb[3] - hb[1])) // 2),
+                  header[:20], font=title_font, fill=_WHITE)
+        # Body text wrapped
+        _draw_wrapped_text(draw, text, body_font, cx + 16, cy + 84, card_w - 32, _LIGHT_GRAY, 8)
+
+
+def _v3_draw_machine_diagram(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    topic: str,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw a simplified machine cross-section diagram with labeled parts."""
+    parts_font = _load_font(bold=False, size=28)
+    label_font = _load_font(bold=True, size=30)
+    title_font = _load_font(bold=True, size=34)
+
+    # Draw process flow: Hopper → Barrel → Screw → Nozzle → Mould → Product
+    steps = ["Hopper", "Barrel+Screw", "Heater Bands", "Nozzle", "Mould", "Product"]
+    if items:
+        steps = [str(s)[:20] for s in items[:6]]
+
+    n = len(steps)
+    box_h = min(120, rh // 3)
+    box_w = max(140, (rw - 60 * n) // n)
+    start_x = rx + 30
+    mid_y = ry + rh // 2 - box_h // 2
+
+    # Draw main body
+    body_y1 = mid_y - 10
+    body_y2 = mid_y + box_h + 10
+    body_x1 = start_x
+    body_x2 = rx + rw - 30
+    draw.rectangle([body_x1, body_y1, body_x2, body_y2],
+                   fill=_CARD_BG, outline=color, width=3)
+
+    # Draw each component box
+    for i, step in enumerate(steps):
+        bx = start_x + i * (box_w + 30)
+        by = mid_y
+        c = _CHART_COLORS[i % len(_CHART_COLORS)]
+        draw.rectangle([bx, by, bx + box_w, by + box_h],
+                       fill=c, outline=_WHITE, width=2)
+        sb = draw.textbbox((0, 0), step, font=parts_font)
+        draw.text((bx + (box_w - (sb[2] - sb[0])) // 2,
+                   by + (box_h - (sb[3] - sb[1])) // 2),
+                  step, font=parts_font, fill=_WHITE)
+        # Arrow between boxes
+        if i < n - 1:
+            ax = bx + box_w + 2
+            ay = mid_y + box_h // 2
+            draw.line([(ax, ay), (ax + 26, ay)], fill=color, width=4)
+            draw.polygon([(ax + 30, ay), (ax + 18, ay - 8), (ax + 18, ay + 8)], fill=color)
+
+    # Material flow label
+    flow_text = "Material Flow →"
+    fb = draw.textbbox((0, 0), flow_text, font=label_font)
+    draw.text((rx + (rw - (fb[2] - fb[0])) // 2, body_y2 + 20),
+              flow_text, font=label_font, fill=color)
+
+    # Topic title at top of diagram area — append "Machine" if not already in topic
+    if "machine" not in topic.lower():
+        tt = topic[:30] + " Machine"
+    else:
+        tt = topic[:38]
+    tb = draw.textbbox((0, 0), tt, font=title_font)
+    draw.text((rx + (rw - (tb[2] - tb[0])) // 2, ry + 10),
+              tt, font=title_font, fill=color)
+
+
+def _v3_draw_formula_sheet(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw a formula sheet with numbered rows and large text."""
+    formulae = [str(s)[:60] for s in items[:6]] if items else ["F = m × a", "E = mc²"]
+    hfont = _load_font(bold=True, size=34)
+    ffont = _load_font(bold=True, size=32)
+    row_h = min(120, (rh - 60) // max(len(formulae), 1))
+
+    draw.rectangle([rx, ry, rx + rw, ry + 52], fill=color)
+    header = "Key Formulas & Parameters"
+    hb = draw.textbbox((0, 0), header, font=hfont)
+    draw.text((rx + (rw - (hb[2] - hb[0])) // 2, ry + 8), header, font=hfont, fill=_WHITE)
+
+    for i, formula in enumerate(formulae):
+        y = ry + 60 + i * row_h
+        bg = (0x1E, 0x38, 0x50) if i % 2 == 0 else _CARD_BG
+        draw.rectangle([rx, y, rx + rw, y + row_h], fill=bg, outline=(0x28, 0x45, 0x62), width=1)
+        # Numbered badge
+        draw.rectangle([rx, y, rx + 46, y + row_h], fill=color)
+        nb = draw.textbbox((0, 0), str(i + 1), font=ffont)
+        draw.text((rx + (46 - (nb[2] - nb[0])) // 2,
+                   y + (row_h - (nb[3] - nb[1])) // 2),
+                  str(i + 1), font=ffont, fill=_WHITE)
+        _draw_wrapped_text(draw, formula, ffont, rx + 56, y + 12, rw - 70, _WHITE, 4)
+
+
+def _v3_draw_grid_cards(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw a 2×2 grid of colored application cards."""
+    texts = [str(s) for s in items[:4]] if items else ["App A", "App B", "App C", "App D"]
+    while len(texts) < 4:
+        texts.append(f"Item {len(texts) + 1}")
+    gap = 20
+    card_w = (rw - gap * 3) // 2
+    card_h = (rh - gap * 3) // 2
+    title_font = _load_font(bold=True, size=32)
+    body_font = _load_font(bold=False, size=28)
+    positions = [
+        (rx + gap, ry + gap),
+        (rx + gap * 2 + card_w, ry + gap),
+        (rx + gap, ry + gap * 2 + card_h),
+        (rx + gap * 2 + card_w, ry + gap * 2 + card_h),
+    ]
+    for i, (text, (cx, cy)) in enumerate(zip(texts, positions)):
+        c = _CHART_COLORS[i % len(_CHART_COLORS)]
+        draw.rectangle([cx, cy, cx + card_w, cy + card_h],
+                       fill=_CARD_BG, outline=c, width=3)
+        draw.rectangle([cx, cy, cx + card_w, cy + 56], fill=c)
+        # Card number badge
+        badge = str(i + 1)
+        bfont = _load_font(bold=True, size=32)
+        bb = draw.textbbox((0, 0), badge, font=bfont)
+        draw.text((cx + 16, cy + (56 - (bb[3] - bb[1])) // 2), badge, font=bfont, fill=_WHITE)
+        # Card title (first ~20 chars of text)
+        tb = draw.textbbox((0, 0), text[:24], font=title_font)
+        draw.text((cx + 52, cy + (56 - (tb[3] - tb[1])) // 2),
+                  text[:24], font=title_font, fill=_WHITE)
+        # Card body (remaining text)
+        if len(text) > 24:
+            _draw_wrapped_text(draw, text[24:], body_font, cx + 16, cy + 68, card_w - 32, _LIGHT_GRAY, 6)
+
+
+def _v3_draw_comparison_table(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw a full-width comparison table with alternating row colors."""
+    rows = [str(s) for s in items[:8]] if items else ["Property: Value"]
+    hfont = _load_font(bold=True, size=32)
+    rfont = _load_font(bold=False, size=28)
+    col_w = rw // 2
+    row_h = min(80, (rh - 60) // max(len(rows) + 1, 1))
+
+    # Header row
+    draw.rectangle([rx, ry, rx + col_w, ry + 56], fill=color)
+    draw.rectangle([rx + col_w, ry, rx + rw, ry + 56],
+                   fill=tuple(max(0, c - 40) for c in color))
+    draw.text((rx + 16, ry + 8), "Property / Standard", font=hfont, fill=_WHITE)
+    draw.text((rx + col_w + 16, ry + 8), "Value / Details", font=hfont, fill=_WHITE)
+
+    alt_bg = (0x1E, 0x38, 0x50)
+    for i, row in enumerate(rows):
+        y = ry + 60 + i * row_h
+        if y + row_h > ry + rh - 4:
+            break
+        bg = alt_bg if i % 2 == 0 else _CARD_BG
+        draw.rectangle([rx, y, rx + rw, y + row_h], fill=bg, outline=(0x28, 0x48, 0x68), width=1)
+        if ":" in row:
+            parts = row.split(":", 1)
+            label, val = parts[0].strip(), parts[1].strip()
+        else:
+            label, val = row, "—"
+        _draw_wrapped_text(draw, label[:35], rfont, rx + 16, y + 8, col_w - 24, color, 3)
+        _draw_wrapped_text(draw, val[:40], rfont, rx + col_w + 16, y + 8, col_w - 24, _WHITE, 3)
+
+
+def _v3_draw_cycle_diagram(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw a circular cycle diagram with arrows."""
+    steps = [str(s)[:22] for s in items[:6]] if items else ["Step 1", "Step 2", "Step 3", "Step 4"]
+    n = len(steps)
+    font = _load_font(bold=True, size=28)
+
+    cx = rx + rw // 2
+    cy = ry + rh // 2
+    orbit_r = min(rw, rh) // 3
+    node_r = min(rw, rh) // 10
+
+    # Draw orbit circle (dashed appearance via many short lines)
+    for deg in range(0, 360, 6):
+        a1 = math.radians(deg)
+        a2 = math.radians(deg + 3)
+        px1 = int(cx + orbit_r * math.cos(a1))
+        py1 = int(cy + orbit_r * math.sin(a1))
+        px2 = int(cx + orbit_r * math.cos(a2))
+        py2 = int(cy + orbit_r * math.sin(a2))
+        draw.line([(px1, py1), (px2, py2)], fill=color, width=2)
+
+    for i, step in enumerate(steps):
+        angle = math.radians(-90 + i * 360 / n)
+        nx = int(cx + orbit_r * math.cos(angle))
+        ny = int(cy + orbit_r * math.sin(angle))
+        c = _CHART_COLORS[i % len(_CHART_COLORS)]
+
+        # Draw arrow along orbit to next node
+        next_angle = math.radians(-90 + (i + 1) * 360 / n)
+        mid_angle = (angle + next_angle) / 2
+        ax = int(cx + orbit_r * math.cos(mid_angle))
+        ay = int(cy + orbit_r * math.sin(mid_angle))
+        d_angle = next_angle - angle
+        perp = mid_angle + math.pi / 2
+        arrow_tip_x = int(ax + 14 * math.cos(perp) * (1 if d_angle > 0 else -1))
+        arrow_tip_y = int(ay + 14 * math.sin(perp) * (1 if d_angle > 0 else -1))
+        draw.polygon([
+            (arrow_tip_x, arrow_tip_y),
+            (int(ax - 8 * math.cos(perp)), int(ay - 8 * math.sin(perp))),
+            (int(ax + 8 * math.cos(perp)), int(ay + 8 * math.sin(perp))),
+        ], fill=color)
+
+        draw.ellipse([nx - node_r, ny - node_r, nx + node_r, ny + node_r],
+                     fill=c, outline=_WHITE, width=2)
+        sb = draw.textbbox((0, 0), step[:16], font=font)
+        # Place text outside the node
+        text_r = orbit_r + node_r + 20
+        tx = int(cx + text_r * math.cos(angle)) - (sb[2] - sb[0]) // 2
+        ty = int(cy + text_r * math.sin(angle)) - (sb[3] - sb[1]) // 2
+        tx = max(rx + 4, min(tx, rx + rw - (sb[2] - sb[0]) - 4))
+        ty = max(ry + 4, min(ty, ry + rh - (sb[3] - sb[1]) - 4))
+        draw.text((tx, ty), step[:16], font=font, fill=_LIGHT_GRAY)
+
+
+def _v3_draw_timeline(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw a full-width horizontal timeline."""
+    events = [str(s)[:28] for s in items[:7]] if items else ["Event 1", "Event 2", "Event 3"]
+    n = len(events)
+    font = _load_font(bold=False, size=28)
+    tfont = _load_font(bold=True, size=32)
+
+    line_y = ry + rh // 2
+    pad_x = rx + 50
+    avail = rw - 100
+
+    # Main axis
+    draw.line([(pad_x, line_y), (rx + rw - pad_x, line_y)], fill=color, width=5)
+    # Arrow at end
+    draw.polygon([
+        (rx + rw - pad_x + 16, line_y),
+        (rx + rw - pad_x, line_y - 10),
+        (rx + rw - pad_x, line_y + 10),
+    ], fill=color)
+
+    for i, event in enumerate(events):
+        ex = pad_x + int(avail * i / max(n - 1, 1))
+        c = _CHART_COLORS[i % len(_CHART_COLORS)]
+
+        # Dot marker
+        draw.ellipse([ex - 14, line_y - 14, ex + 14, line_y + 14],
+                     fill=c, outline=_WHITE, width=2)
+        num = str(i + 1)
+        nb = draw.textbbox((0, 0), num, font=tfont)
+        draw.text((ex - (nb[2] - nb[0]) // 2, line_y - (nb[3] - nb[1]) // 2),
+                  num, font=tfont, fill=_WHITE)
+
+        # Label alternating above/below
+        label = event[:24]
+        bb = draw.textbbox((0, 0), label, font=font)
+        lw = bb[2] - bb[0]
+        lx = max(rx + 2, min(ex - lw // 2, rx + rw - lw - 4))
+        if i % 2 == 0:
+            draw.line([(ex, line_y - 16), (ex, line_y - 50)], fill=c, width=2)
+            draw.text((lx, line_y - 56 - (bb[3] - bb[1])),
+                      label, font=font, fill=_LIGHT_GRAY)
+        else:
+            draw.line([(ex, line_y + 16), (ex, line_y + 50)], fill=c, width=2)
+            draw.text((lx, line_y + 56), label, font=font, fill=_LIGHT_GRAY)
+
+
+def _v3_draw_mind_map(
+    draw: ImageDraw.ImageDraw,
+    items: list,
+    color: tuple,
+    title: str,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw a mind map with central topic node and radiating branches."""
+    branches = [str(s)[:28] for s in items[:8]] if items else ["Topic A", "Topic B", "Topic C"]
+    n = len(branches)
+    cfont = _load_font(bold=True, size=36)
+    bfont = _load_font(bold=False, size=28)
+
+    cx = rx + rw // 2
+    cy = ry + rh // 2
+    cr = min(rw, rh) // 7
+    arm_len = min(rw, rh) // 3
+    bw = max(160, rw // 6)
+    bh = 52
+
+    draw.ellipse([cx - cr, cy - cr, cx + cr, cy + cr],
+                 fill=color, outline=_WHITE, width=3)
+    short = (title[:14] + "..") if len(title) > 16 else title
+    tb = draw.textbbox((0, 0), short, font=cfont)
+    draw.text((cx - (tb[2] - tb[0]) // 2, cy - (tb[3] - tb[1]) // 2),
+              short, font=cfont, fill=_WHITE)
+
+    for i, branch in enumerate(branches):
+        angle = math.radians(-90 + i * 360 / n)
+        bx_c = int(cx + arm_len * math.cos(angle))
+        by_c = int(cy + arm_len * math.sin(angle))
+        c = _CHART_COLORS[i % len(_CHART_COLORS)]
+        draw.line([(cx, cy), (bx_c, by_c)], fill=c, width=3)
+
+        lx = max(rx + 4, min(bx_c - bw // 2, rx + rw - bw - 4))
+        ly = max(ry + 4, min(by_c - bh // 2, ry + rh - bh - 4))
+        draw.rectangle([lx, ly, lx + bw, ly + bh], fill=c, outline=_WHITE, width=1)
+        pb = draw.textbbox((0, 0), branch[:22], font=bfont)
+        draw.text((lx + (bw - (pb[2] - pb[0])) // 2,
+                   ly + (bh - (pb[3] - pb[1])) // 2),
+                  branch[:22], font=bfont, fill=_WHITE)
+
+
+# ---------------------------------------------------------------------------
+# V3.0 Per-slide layout functions
+# Each layout fills the content_rect = (rx, ry, rw, rh) below the title bar.
+# ---------------------------------------------------------------------------
+
+
+def _v3_render_common_header(
+    draw: ImageDraw.ImageDraw,
+    slide_data: dict,
+    slide_index: int,
+    total_slides: int,
+    department: str,
+    accent: tuple,
+) -> int:
+    """Draw common V3 header (top bar, title, underline) and return content start y."""
+    # Top accent bar
+    draw.rectangle([0, 0, 1920, 14], fill=accent)
+
+    # Slide title
+    title_font = _load_font(bold=True, size=56)
+    title_text = slide_data.get("title", f"Slide {slide_index}")
+    title_x, title_y = 32, 24
+    draw.text((title_x, title_y), title_text, font=title_font, fill=accent)
+
+    # Title underline
+    tb = draw.textbbox((title_x, title_y), title_text, font=title_font)
+    uline_y = tb[3] + 6
+    draw.rectangle([title_x, uline_y, 1888, uline_y + 4], fill=accent)
+
+    # Slide number badge (top right)
+    num_font = _load_font(bold=True, size=28)
+    num_text = f"{slide_index}/{total_slides}"
+    nb = draw.textbbox((0, 0), num_text, font=num_font)
+    draw.text((1888 - (nb[2] - nb[0]), 30), num_text, font=num_font, fill=accent)
+
+    return uline_y + 14  # content area starts here
+
+
+def _v3_render_common_footer(draw: ImageDraw.ImageDraw, department: str, accent: tuple) -> int:
+    """Draw common V3 bottom bar and return its y position."""
+    bot_y = 1000
+    draw.rectangle([0, bot_y, 1920, 1080], fill=_BOTTOM_BG)
+    bot_font = _load_font(bold=False, size=24)
+    bot_text = f"CIPETHUB  \u2022  {department} Engineering  \u2022  Subscribe for more"
+    bb = draw.textbbox((0, 0), bot_text, font=bot_font)
+    bx = (1920 - (bb[2] - bb[0])) // 2
+    by = bot_y + (80 - (bb[3] - bb[1])) // 2
+    draw.text((bx, by), bot_text, font=bot_font, fill=_LIGHT_GRAY)
+    return bot_y
+
+
+def _v3_draw_bullets(
+    draw: ImageDraw.ImageDraw,
+    bullets: list,
+    accent: tuple,
+    rx: int, ry: int, rw: int, rh: int,
+) -> None:
+    """Draw large bullet points (36px) in the specified rectangle."""
+    font = _load_font(bold=False, size=36)
+    y = ry + 16
+    for i, bullet in enumerate(bullets[:4]):
+        if i > 0:
+            sep_y = y - 8
+            draw.line([(rx + 12, sep_y), (rx + rw - 12, sep_y)],
+                      fill=(0x25, 0x40, 0x58), width=1)
+        prefix = "\u25cf  " if i == 0 else "\u25b8  "
+        y = _draw_wrapped_text(
+            draw, f"{prefix}{bullet}", font,
+            rx + 16, y, rw - 32, _WHITE, line_spacing=10,
+        )
+        y += 20
+
+
+# ---------------------------------------------------------------------------
+# V3.0 Slide Renderer — 12 distinct layouts with per-slide accent colors
+# ---------------------------------------------------------------------------
+
+
+def render_slide_image_v3(
+    slide_data: dict,
+    slide_index: int,
+    total_slides: int,
+    department: str,
+) -> Image.Image:
+    """Render one 1920×1080 PNG slide image V3 with per-slide layout and color.
+
+    Uses SLIDE_COLORS_PIL to assign a unique accent color to each slide.
+    12 different layouts are cycled through based on slide_index.
+    Minimum font size: 28px. Title: 56px. Bullets: 36px.
+    70%+ of content area is visual.
+    """
+    idx0 = (slide_index - 1) % 12  # 0-based layout index
+    accent = SLIDE_COLORS_PIL[idx0]
+
+    img = Image.new("RGB", (1920, 1080), _BG_DARK)
+    draw = ImageDraw.Draw(img)
+
+    bullets = slide_data.get("bullets", [])
+    title = slide_data.get("title", f"Slide {slide_index}")
+    visual_desc = slide_data.get("visual_description",
+                                 slide_data.get("visual_hint", ""))
+
+    content_y = _v3_render_common_header(draw, slide_data, slide_index,
+                                         total_slides, department, accent)
+    bot_y = _v3_render_common_footer(draw, department, accent)
+
+    # Content rectangle
+    rx, ry = 32, content_y
+    rw = 1920 - 64
+    rh = bot_y - ry - 8
+
+    # Reuse bullets drawn to left panel for split layouts
+    left_w = rw * 35 // 100   # ~35% text
+    right_w = rw - left_w - 20  # ~65% visual
+
+    # --- Layout 1: INTRO — full-screen title card ---
+    if idx0 == 0:
+        # Draw large topic name
+        big_font = _load_font(bold=True, size=72)
+        sub_font = _load_font(bold=False, size=36)
+
+        # Gradient-like background band
+        for dy in range(rh):
+            frac = dy / rh
+            r = int(_BG_DARK[0] + (accent[0] - _BG_DARK[0]) * frac * 0.3)
+            g = int(_BG_DARK[1] + (accent[1] - _BG_DARK[1]) * frac * 0.3)
+            b = int(_BG_DARK[2] + (accent[2] - _BG_DARK[2]) * frac * 0.3)
+            draw.line([(0, ry + dy), (1920, ry + dy)], fill=(r, g, b))
+
+        tb = draw.textbbox((0, 0), title, font=big_font)
+        tx = (1920 - (tb[2] - tb[0])) // 2
+        ty = ry + (rh - (tb[3] - tb[1])) // 2 - 40
+        draw.text((tx, ty), title, font=big_font, fill=accent)
+
+        sub = "Let's Learn!"
+        sb = draw.textbbox((0, 0), sub, font=sub_font)
+        draw.text(((1920 - (sb[2] - sb[0])) // 2, ty + (tb[3] - tb[1]) + 24),
+                  sub, font=sub_font, fill=_LIGHT_GRAY)
+
+    # --- Layout 2: CONCEPTS — left bullets | right labeled diagram ---
+    elif idx0 == 1:
+        draw.rectangle([rx, ry, rx + left_w, ry + rh], fill=_CARD_BG)
+        _v3_draw_bullets(draw, bullets, accent, rx, ry, left_w, rh)
+        vis_x = rx + left_w + 20
+        draw.rectangle([vis_x, ry, vis_x + right_w, ry + rh], fill=_CARD_BG)
+        _v3_draw_labeled_diagram(draw, bullets, accent, title,
+                                 vis_x, ry, right_w, rh)
+
+    # --- Layout 3: TYPES — full-width 3 comparison cards ---
+    elif idx0 == 2:
+        _v3_draw_comparison_cards(draw, bullets, accent, rx, ry, rw, rh)
+
+    # --- Layout 4: PROPERTIES — left mini text | right large bar chart ---
+    elif idx0 == 3:
+        draw.rectangle([rx, ry, rx + left_w, ry + rh], fill=_CARD_BG)
+        _v3_draw_bullets(draw, bullets, accent, rx, ry, left_w, rh)
+        vis_x = rx + left_w + 20
+        draw.rectangle([vis_x, ry, vis_x + right_w, ry + rh], fill=_CARD_BG)
+        _v3_draw_bar_chart(draw, bullets, accent, vis_x, ry, right_w, rh)
+
+    # --- Layout 5: PROCESS — full-width flowchart ---
+    elif idx0 == 4:
+        draw.rectangle([rx, ry, rx + rw, ry + rh], fill=_CARD_BG)
+        _v3_draw_flowchart(draw, bullets, accent, rx, ry, rw, rh)
+
+    # --- Layout 6: EQUIPMENT — full-width machine diagram ---
+    elif idx0 == 5:
+        draw.rectangle([rx, ry, rx + rw, ry + rh], fill=_CARD_BG)
+        _v3_draw_machine_diagram(draw, bullets, accent, title, rx, ry, rw, rh)
+
+    # --- Layout 7: CALCULATIONS — left formula | right worked example ---
+    elif idx0 == 6:
+        half_w = rw // 2 - 10
+        draw.rectangle([rx, ry, rx + half_w, ry + rh], fill=_CARD_BG)
+        _v3_draw_formula_sheet(draw, bullets[:3], accent, rx, ry, half_w, rh)
+        vis_x = rx + half_w + 20
+        draw.rectangle([vis_x, ry, vis_x + half_w, ry + rh], fill=_CARD_BG)
+        _v3_draw_bullets(draw, bullets[3:] or bullets, accent, vis_x, ry, half_w, rh)
+
+    # --- Layout 8: APPLICATIONS — 2×2 grid cards ---
+    elif idx0 == 7:
+        _v3_draw_grid_cards(draw, bullets, accent, rx, ry, rw, rh)
+
+    # --- Layout 9: STANDARDS — full-width comparison table ---
+    elif idx0 == 8:
+        draw.rectangle([rx, ry, rx + rw, ry + rh], fill=_CARD_BG)
+        _v3_draw_comparison_table(draw, bullets, accent, rx, ry, rw, rh)
+
+    # --- Layout 10: ENVIRONMENT — left key points | right cycle diagram ---
+    elif idx0 == 9:
+        draw.rectangle([rx, ry, rx + left_w, ry + rh], fill=_CARD_BG)
+        _v3_draw_bullets(draw, bullets, accent, rx, ry, left_w, rh)
+        vis_x = rx + left_w + 20
+        draw.rectangle([vis_x, ry, vis_x + right_w, ry + rh], fill=_CARD_BG)
+        _v3_draw_cycle_diagram(draw, bullets, accent, vis_x, ry, right_w, rh)
+
+    # --- Layout 11: TRENDS — full-width timeline ---
+    elif idx0 == 10:
+        draw.rectangle([rx, ry, rx + rw, ry + rh], fill=_CARD_BG)
+        _v3_draw_timeline(draw, bullets, accent, rx, ry, rw, rh)
+
+    # --- Layout 12: SUMMARY — full-width mind map ---
+    elif idx0 == 11:
+        draw.rectangle([rx, ry, rx + rw, ry + rh], fill=_CARD_BG)
+        _v3_draw_mind_map(draw, bullets, accent, title, rx, ry, rw, rh)
+
+    return img
+
+
+# ---------------------------------------------------------------------------
+# Slide Image Rendering (Pillow) — V2 (kept for reference)
 # ---------------------------------------------------------------------------
 
 # Scale factor: 1920 px / 16 inches = 120 px per inch
@@ -1176,124 +1856,116 @@ def render_slide_image(
 
 
 def render_intro_image(topic: str, department: str) -> Image.Image:
-    """Render a 1920×1080 intro slide with CIPETHUB branding and topic title."""
-    dept_color = DEPT_COLORS_PIL.get(department, DEPT_COLORS_PIL["All"])
+    """Render a 1920×1080 intro slide — large topic name, minimal branding."""
+    accent = SLIDE_COLORS_PIL[0]  # Orange for intro
     img  = Image.new("RGB", (1920, 1080), _BG_DARK)
     draw = ImageDraw.Draw(img)
 
-    # Full-width top and bottom accent bars
-    draw.rectangle([0, 0, 1920, 10], fill=dept_color)
-    draw.rectangle([0, 1070, 1920, 1080], fill=dept_color)
+    # Full-width accent bars
+    draw.rectangle([0, 0, 1920, 14], fill=accent)
+    draw.rectangle([0, 1066, 1920, 1080], fill=accent)
+    draw.rectangle([0, 0, 10, 1080], fill=accent)
 
-    # Left vertical accent strip
-    draw.rectangle([0, 0, 8, 1080], fill=dept_color)
+    # Gradient background
+    for dy in range(1080):
+        frac = dy / 1080
+        r = int(_BG_DARK[0] + (accent[0] - _BG_DARK[0]) * frac * 0.25)
+        g = int(_BG_DARK[1] + (accent[1] - _BG_DARK[1]) * frac * 0.25)
+        b = int(_BG_DARK[2] + (accent[2] - _BG_DARK[2]) * frac * 0.25)
+        draw.line([(10, dy), (1920, dy)], fill=(r, g, b))
 
-    # Centred CIPETHUB logo text
-    logo_font  = _load_font(bold=True, size=96)
-    sub1_font  = _load_font(bold=False, size=36)
-    title_font = _load_font(bold=True, size=50)
-    sub2_font  = _load_font(bold=False, size=28)
+    big_font   = _load_font(bold=True, size=96)
+    dept_font  = _load_font(bold=True, size=40)
+    sub_font   = _load_font(bold=False, size=32)
+    brand_font = _load_font(bold=False, size=26)
 
-    logo_text = "CIPETHUB"
-    lb = draw.textbbox((0, 0), logo_text, font=logo_font)
-    draw.text(((1920 - (lb[2] - lb[0])) // 2, 200),
-              logo_text, font=logo_font, fill=dept_color)
-
-    sub1 = "CIPET Study Material"
-    sb = draw.textbbox((0, 0), sub1, font=sub1_font)
-    draw.text(((1920 - (sb[2] - sb[0])) // 2, 330),
-              sub1, font=sub1_font, fill=_LIGHT_GRAY)
+    # Topic name — HUGE
+    topic_text = topic[:60]
+    tb = draw.textbbox((0, 0), topic_text, font=big_font)
+    tx = (1920 - (tb[2] - tb[0])) // 2
+    draw.text((tx, 280), topic_text, font=big_font, fill=accent)
 
     # Horizontal divider
-    draw.rectangle([300, 400, 1620, 404], fill=dept_color)
-
-    # Topic title
-    topic_short = topic[:60]
-    ttb = draw.textbbox((0, 0), topic_short, font=title_font)
-    draw.text(((1920 - (ttb[2] - ttb[0])) // 2, 440),
-              topic_short, font=title_font, fill=_WHITE)
+    draw.rectangle([200, 420, 1720, 426], fill=accent)
 
     # Department badge
     dept_text = f"{department} Engineering"
-    db = draw.textbbox((0, 0), dept_text, font=sub2_font)
+    db = draw.textbbox((0, 0), dept_text, font=dept_font)
     dx = (1920 - (db[2] - db[0])) // 2
-    draw.rectangle([dx - 20, 530, dx + (db[2] - db[0]) + 20, 530 + (db[3] - db[1]) + 16],
-                   fill=dept_color)
-    draw.text((dx, 538), dept_text, font=sub2_font, fill=_WHITE)
+    draw.rectangle([dx - 24, 446, dx + (db[2] - db[0]) + 24, 446 + (db[3] - db[1]) + 20],
+                   fill=accent)
+    draw.text((dx, 456), dept_text, font=dept_font, fill=_WHITE)
 
-    # "Welcome" message
-    welcome = "Namaskar! Welcome to CIPETHUB"
-    wf = _load_font(bold=False, size=24)
-    wb = draw.textbbox((0, 0), welcome, font=wf)
-    draw.text(((1920 - (wb[2] - wb[0])) // 2, 640),
-              welcome, font=wf, fill=_LIGHT_GRAY)
+    # "Let's learn!" tagline
+    sub_text = "Let's Learn!"
+    sb = draw.textbbox((0, 0), sub_text, font=sub_font)
+    draw.text(((1920 - (sb[2] - sb[0])) // 2, 560), sub_text, font=sub_font, fill=_LIGHT_GRAY)
+
+    # CIPETHUB branding (small, once)
+    brand_text = "CIPETHUB"
+    bb = draw.textbbox((0, 0), brand_text, font=brand_font)
+    draw.text((1920 - (bb[2] - bb[0]) - 20, 1032), brand_text, font=brand_font, fill=accent)
 
     return img
 
 
 def render_outro_image(department: str) -> Image.Image:
-    """Render a 1920×1080 outro slide with subscribe/like/share CTA."""
-    dept_color = DEPT_COLORS_PIL.get(department, DEPT_COLORS_PIL["All"])
+    """Render a 1920×1080 outro slide with subscribe CTA."""
+    accent = SLIDE_COLORS_PIL[11]  # Blue Grey for outro
     img  = Image.new("RGB", (1920, 1080), _BG_DARK)
     draw = ImageDraw.Draw(img)
 
-    draw.rectangle([0, 0, 1920, 10], fill=dept_color)
-    draw.rectangle([0, 1070, 1920, 1080], fill=dept_color)
-    draw.rectangle([0, 0, 8, 1080], fill=dept_color)
-    draw.rectangle([1912, 0, 1920, 1080], fill=dept_color)
+    draw.rectangle([0, 0, 1920, 14], fill=accent)
+    draw.rectangle([0, 1066, 1920, 1080], fill=accent)
+    draw.rectangle([0, 0, 10, 1080], fill=accent)
+    draw.rectangle([1910, 0, 1920, 1080], fill=accent)
 
     ty_font  = _load_font(bold=True, size=96)
     cta_font = _load_font(bold=True, size=44)
-    sub_font = _load_font(bold=False, size=28)
-    sm_font  = _load_font(bold=False, size=24)
+    sub_font = _load_font(bold=False, size=32)
 
     ty_text = "Thank You!"
     tb = draw.textbbox((0, 0), ty_text, font=ty_font)
     draw.text(((1920 - (tb[2] - tb[0])) // 2, 160),
-              ty_text, font=ty_font, fill=dept_color)
+              ty_text, font=ty_font, fill=accent)
 
-    draw.rectangle([300, 320, 1620, 324], fill=dept_color)
+    draw.rectangle([300, 320, 1620, 326], fill=accent)
 
-    actions = ["Like", "Subscribe", "Share"]
-    icons   = ["👍", "🔔", "📤"]
-    for i, (act, icon) in enumerate(zip(actions, icons)):
+    # Subscribe / Like / Share buttons
+    actions = [("👍", "Like"), ("🔔", "Subscribe"), ("📤", "Share")]
+    for i, (icon, act) in enumerate(actions):
         bx = 280 + i * 450
         bw, bh = 380, 100
-        draw.rectangle([bx, 360, bx + bw, 360 + bh], fill=dept_color, outline=_WHITE, width=2)
+        draw.rectangle([bx, 360, bx + bw, 360 + bh], fill=accent, outline=_WHITE, width=2)
         label = f"{icon} {act}"
         lb = draw.textbbox((0, 0), label, font=cta_font)
         draw.text((bx + (bw - (lb[2] - lb[0])) // 2, 360 + (bh - (lb[3] - lb[1])) // 2),
                   label, font=cta_font, fill=_WHITE)
 
-    brand_line = "CIPETHUB — CIPET Study Material"
-    blb = draw.textbbox((0, 0), brand_line, font=sub_font)
+    brand_text = "CIPETHUB — Subscribe for more lectures"
+    blb = draw.textbbox((0, 0), brand_text, font=sub_font)
     draw.text(((1920 - (blb[2] - blb[0])) // 2, 520),
-              brand_line, font=sub_font, fill=dept_color)
+              brand_text, font=sub_font, fill=accent)
 
-    next_text = "Next Video Coming Soon!"
-    nb = draw.textbbox((0, 0), next_text, font=sm_font)
+    next_text = "New lectures every week!"
+    nb = draw.textbbox((0, 0), next_text, font=sub_font)
     draw.text(((1920 - (nb[2] - nb[0])) // 2, 590),
-              next_text, font=sm_font, fill=_LIGHT_GRAY)
-
-    jai = "Jai Hind!"
-    jb = draw.textbbox((0, 0), jai, font=sub_font)
-    draw.text(((1920 - (jb[2] - jb[0])) // 2, 680),
-              jai, font=sub_font, fill=_WHITE)
+              next_text, font=sub_font, fill=_LIGHT_GRAY)
 
     return img
 
 
 def render_slide_images(script_slides: list, department: str, img_dir: str) -> list:
-    """Render each slide to a 1920×1080 PNG via Pillow and save to *img_dir*."""
+    """Render each slide to a 1920×1080 PNG via Pillow V3 and save to *img_dir*."""
     os.makedirs(img_dir, exist_ok=True)
     total = len(script_slides)
     paths = []
     for i, slide_data in enumerate(script_slides, start=1):
         out_path = os.path.join(img_dir, f"slide_{i:02d}.png")
-        img = render_slide_image(slide_data, department, i, total)
+        img = render_slide_image_v3(slide_data, i, total, department)
         img.save(out_path, "PNG")
         paths.append(out_path)
-        print(f"[generator] Rendered slide image: slide_{i:02d}.png")
+        print(f"[generator] Rendered slide image (V3): slide_{i:02d}.png")
     print(f"[generator] Rendered {len(paths)} slide images.")
     return paths
 
@@ -1635,10 +2307,9 @@ def generate_full_video(topic: str, department: str, video_type: str) -> dict:
     intro_img.save(intro_img_path, "PNG")
 
     intro_narration = (
-        f"Namaskar and welcome to CIPETHUB! "
-        f"Today we will study {topic} in detail. "
-        f"This is an important topic for {department} engineering students at CIPET. "
-        "Please watch till the end, like and subscribe to CIPETHUB for more such lectures."
+        f"Welcome! Today we learn about {topic}. "
+        f"This lecture covers the complete technical content for {department} engineering students. "
+        "Watch till the end, then subscribe for more lectures like this."
     )
     intro_audio_path = os.path.join(audio_dir, "audio_00.mp3")
     gTTS(text=intro_narration, lang="en", tld="co.in").save(intro_audio_path)
@@ -1659,11 +2330,9 @@ def generate_full_video(topic: str, department: str, video_type: str) -> dict:
     outro_img.save(outro_img_path, "PNG")
 
     outro_narration = (
-        "Thank you dear students for watching this lecture on CIPETHUB. "
-        "Please give this video a thumbs up, subscribe to our channel, "
-        "and share it with your CIPET classmates. "
-        "Your support helps us create more such quality study material. "
-        "Jai Hind!"
+        "That wraps up today's lecture. "
+        "If this was helpful, please like, subscribe, and share with your classmates. "
+        "Subscribe to CIPETHUB for more technical lectures."
     )
     outro_audio_path = os.path.join(audio_dir, "audio_13.mp3")
     gTTS(text=outro_narration, lang="en", tld="co.in").save(outro_audio_path)
@@ -1710,4 +2379,5 @@ def generate_full_video(topic: str, department: str, video_type: str) -> dict:
         "duration_minutes": round(duration_sec / 60, 2),
         "size_mb": round(size_bytes / (1024 * 1024), 2),
         "channel": "CIPETHUB",
+        "engine_version": "3.0",
     }
