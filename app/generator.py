@@ -3,16 +3,15 @@ CIPETHUB Engine — Video Generation Pipeline
 Generates educational lecture MP4 videos for CIPET students.
 """
 
-import asyncio
 import json
 import os
 import re
 import subprocess
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import edge_tts
+from gtts import gTTS
+from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.util import Inches, Pt
@@ -28,13 +27,20 @@ DEPT_COLORS = {
     "All": RGBColor(0xFF, 0xD5, 0x4F),
 }
 
+# Pillow-compatible (R, G, B) tuples for the same department palette
+DEPT_COLORS_PIL = {
+    "Plastics":      (0xFF, 0x6F, 0x00),
+    "Mechanical":    (0x21, 0x96, 0xF3),
+    "Manufacturing": (0x4C, 0xAF, 0x50),
+    "All":           (0xFF, 0xD5, 0x4F),
+}
+
 BG_DARK = RGBColor(0x0D, 0x1B, 0x2A)
 CARD_BG = RGBColor(0x15, 0x2A, 0x3D)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 LIGHT_GRAY = RGBColor(0xB0, 0xBE, 0xC5)
 BOTTOM_BAR_BG = RGBColor(0x07, 0x11, 0x1A)
 
-TTS_VOICE_DEFAULT = "en-IN-PrabhatNeural"
 STDERR_TAIL = 500  # characters to include from end of stderr in error messages
 
 # ---------------------------------------------------------------------------
@@ -111,7 +117,9 @@ Generate exactly 12 slides. The tags array must have exactly 20 items."""
         return data
 
     except Exception as exc:
-        print(f"[generator] Gemini error: {exc} — using fallback.")
+        import traceback
+        print(f"[generator] Gemini error ({type(exc).__name__}): {exc}")
+        traceback.print_exc()
         return _fallback(topic, department)
 
 
@@ -545,40 +553,213 @@ def make_ppt(script: dict, department: str, work_dir: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# PPT → Images
+# Slide Image Rendering (Pillow)
 # ---------------------------------------------------------------------------
 
+# Scale factor: 1920 px / 16 inches = 120 px per inch
+_PX = 120
 
-def ppt_to_images(ppt_path: str, img_dir: str) -> list:
-    """Convert PPT slides to PNG images using LibreOffice headless."""
-    os.makedirs(img_dir, exist_ok=True)
-    cmd = [
-        "libreoffice", "--headless", "--convert-to", "png",
-        "--outdir", img_dir, ppt_path,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if result.returncode != 0:
-        print(f"[generator] LibreOffice stderr: {result.stderr}")
-        raise RuntimeError(
-            f"LibreOffice PPT-to-PNG conversion failed (cmd={cmd!r}): {result.stderr[-STDERR_TAIL:]}"
+# Pillow color constants
+_BG_DARK    = (0x0D, 0x1B, 0x2A)
+_CARD_BG    = (0x15, 0x2A, 0x3D)
+_WHITE      = (0xFF, 0xFF, 0xFF)
+_LIGHT_GRAY = (0xB0, 0xBE, 0xC5)
+_BOTTOM_BG  = (0x07, 0x11, 0x1A)
+
+
+def _load_font(bold: bool = False, size: int = 20) -> ImageFont.ImageFont:
+    """Load DejaVu Sans from disk, falling back to PIL's built-in font."""
+    candidates = (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
+        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf" if bold
+        else "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    )
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                pass
+    return ImageFont.load_default()
+
+
+def _draw_wrapped_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.ImageFont,
+    x: int,
+    y: int,
+    max_width: int,
+    fill: tuple,
+    line_spacing: int = 6,
+) -> int:
+    """Draw word-wrapped text and return the y position after the last line."""
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        test = f"{current} {word}".strip()
+        bbox = draw.textbbox((0, 0), test, font=font)
+        if bbox[2] - bbox[0] <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+
+    for line in lines:
+        draw.text((x, y), line, font=font, fill=fill)
+        bbox = draw.textbbox((0, 0), line, font=font)
+        y += (bbox[3] - bbox[1]) + line_spacing
+    return y
+
+
+def render_slide_image(
+    slide_data: dict,
+    department: str,
+    slide_index: int,
+    total_slides: int,
+) -> Image.Image:
+    """Render one 1920×1080 PNG slide image using Pillow.
+
+    Args:
+        slide_data: Slide dict with keys ``title`` (str), ``bullets`` (list of str),
+                    and ``visual_hint`` (str).
+        department: Department name (e.g. "Plastics", "Mechanical").  Used to look up
+                    the accent color from DEPT_COLORS_PIL.
+        slide_index: 1-based index of this slide (shown in the slide-number label).
+        total_slides: Total number of slides in the presentation (shown in the
+                      slide-number label as ``slide_index/total_slides``).
+
+    Returns:
+        A Pillow :class:`~PIL.Image.Image` object (RGB, 1920×1080).
+    """
+    dept_color = DEPT_COLORS_PIL.get(department, DEPT_COLORS_PIL["All"])
+    img = Image.new("RGB", (1920, 1080), _BG_DARK)
+    draw = ImageDraw.Draw(img)
+
+    # --- Top accent bar ---
+    draw.rectangle([0, 0, 1920, int(0.12 * _PX)], fill=dept_color)
+
+    # --- Department badge (top left) ---
+    bx, by, bw, bh = int(0.2 * _PX), int(0.18 * _PX), int(2.0 * _PX), int(0.38 * _PX)
+    draw.rectangle([bx, by, bx + bw, by + bh], fill=dept_color)
+    badge_font = _load_font(bold=True, size=14)
+    badge_text = department.upper()
+    bb = draw.textbbox((0, 0), badge_text, font=badge_font)
+    tx = bx + (bw - (bb[2] - bb[0])) // 2
+    ty = by + (bh - (bb[3] - bb[1])) // 2
+    draw.text((tx, ty), badge_text, font=badge_font, fill=_WHITE)
+
+    # --- CIPETHUB branding (top right) ---
+    brand_font = _load_font(bold=True, size=26)
+    sub_font   = _load_font(bold=False, size=13)
+    brand_text = "CIPETHUB"
+    sub_text   = "CIPET Study Material"
+    brand_bb = draw.textbbox((0, 0), brand_text, font=brand_font)
+    sub_bb   = draw.textbbox((0, 0), sub_text,   font=sub_font)
+    brand_x = 1920 - int(0.2 * _PX) - (brand_bb[2] - brand_bb[0])
+    draw.text((brand_x, int(0.18 * _PX)), brand_text, font=brand_font, fill=dept_color)
+    sub_x = 1920 - int(0.2 * _PX) - (sub_bb[2] - sub_bb[0])
+    draw.text((sub_x, int(0.18 * _PX) + (brand_bb[3] - brand_bb[1]) + 4),
+              sub_text, font=sub_font, fill=_LIGHT_GRAY)
+
+    # --- Slide title ---
+    title_font = _load_font(bold=True, size=46)
+    title_text = slide_data.get("title", f"Slide {slide_index}")
+    tx_start = int(0.3 * _PX)
+    ty_start = int(0.65 * _PX)
+    draw.text((tx_start, ty_start), title_text, font=title_font, fill=dept_color)
+
+    # --- Title underline bar ---
+    ubar_y = int(1.45 * _PX)
+    draw.rectangle([int(0.3 * _PX), ubar_y, int(10.8 * _PX), ubar_y + int(0.05 * _PX)],
+                   fill=dept_color)
+
+    # --- Content card ---
+    card_x1 = int(0.3  * _PX)
+    card_y1 = int(1.55 * _PX)
+    card_x2 = int(10.8 * _PX)
+    card_y2 = int(7.65 * _PX)
+    draw.rectangle([card_x1, card_y1, card_x2, card_y2], fill=_CARD_BG)
+
+    # --- Bullet points ---
+    bullet_font = _load_font(bold=False, size=28)
+    bul_x = int(0.55 * _PX)
+    bul_y = int(1.75 * _PX)
+    max_bul_w = card_x2 - bul_x - int(0.2 * _PX)
+    for bullet in slide_data.get("bullets", []):
+        bul_y = _draw_wrapped_text(
+            draw, f"\u25b8  {bullet}", bullet_font,
+            bul_x, bul_y, max_bul_w, _WHITE, line_spacing=8,
         )
+        bul_y += 10  # extra gap between bullets
 
-    # LibreOffice names files as <basename>_<n>.png or <basename>.png for single slide
-    base = Path(ppt_path).stem
-    raw_images = sorted(
-        Path(img_dir).glob(f"{base}*.png"),
-        key=lambda p: p.name,
+    # --- Visual hint box (right side) ---
+    hint_x1 = int(11.0 * _PX)
+    hint_y1 = int(1.55 * _PX)
+    hint_x2 = int(15.7 * _PX)
+    hint_y2 = int(7.65 * _PX)
+    draw.rectangle([hint_x1, hint_y1, hint_x2, hint_y2], fill=_CARD_BG)
+    draw.rectangle([hint_x1, hint_y1, hint_x2, hint_y2], outline=dept_color, width=2)
+
+    # Hint label
+    hint_label_font = _load_font(bold=True, size=16)
+    label_text = "\U0001f4ca VISUAL"
+    lb = draw.textbbox((0, 0), label_text, font=hint_label_font)
+    lx = hint_x1 + ((hint_x2 - hint_x1) - (lb[2] - lb[0])) // 2
+    draw.text((lx, hint_y1 + int(0.1 * _PX)), label_text,
+              font=hint_label_font, fill=dept_color)
+
+    # Hint text (word-wrapped)
+    hint_text_font = _load_font(bold=False, size=18)
+    _draw_wrapped_text(
+        draw,
+        slide_data.get("visual_hint", "Diagram here"),
+        hint_text_font,
+        hint_x1 + int(0.1 * _PX),
+        hint_y1 + int(0.55 * _PX),
+        (hint_x2 - hint_x1) - int(0.2 * _PX),
+        _LIGHT_GRAY,
+        line_spacing=6,
     )
 
-    # Rename to slide_01.png, slide_02.png, …
-    renamed = []
-    for i, img in enumerate(raw_images, start=1):
-        new_name = Path(img_dir) / f"slide_{i:02d}.png"
-        img.rename(new_name)
-        renamed.append(str(new_name))
+    # --- Bottom bar ---
+    bot_y = int(8.7 * _PX)
+    draw.rectangle([0, bot_y, 1920, 1080], fill=_BOTTOM_BG)
+    bot_font  = _load_font(bold=False, size=14)
+    bot_text  = f"CIPETHUB  \u2022  {department} Engineering  \u2022  Subscribe & Like!"
+    bot_bb    = draw.textbbox((0, 0), bot_text, font=bot_font)
+    bot_tx    = (1920 - (bot_bb[2] - bot_bb[0])) // 2
+    bot_ty    = bot_y + (1080 - bot_y - (bot_bb[3] - bot_bb[1])) // 2
+    draw.text((bot_tx, bot_ty), bot_text, font=bot_font, fill=_LIGHT_GRAY)
 
-    print(f"[generator] Converted {len(renamed)} slides to images.")
-    return renamed
+    # --- Slide number (bottom right) ---
+    num_font = _load_font(bold=True, size=20)
+    num_text = f"{slide_index}/{total_slides}"
+    nb = draw.textbbox((0, 0), num_text, font=num_font)
+    draw.text((1920 - int(0.3 * _PX) - (nb[2] - nb[0]), bot_ty),
+              num_text, font=num_font, fill=dept_color)
+
+    return img
+
+
+def render_slide_images(script_slides: list, department: str, img_dir: str) -> list:
+    """Render each slide to a 1920×1080 PNG via Pillow and save to *img_dir*."""
+    os.makedirs(img_dir, exist_ok=True)
+    total = len(script_slides)
+    paths = []
+    for i, slide_data in enumerate(script_slides, start=1):
+        out_path = os.path.join(img_dir, f"slide_{i:02d}.png")
+        img = render_slide_image(slide_data, department, i, total)
+        img.save(out_path, "PNG")
+        paths.append(out_path)
+        print(f"[generator] Rendered slide image: slide_{i:02d}.png")
+    print(f"[generator] Rendered {len(paths)} slide images.")
+    return paths
 
 
 # ---------------------------------------------------------------------------
@@ -587,23 +768,17 @@ def ppt_to_images(ppt_path: str, img_dir: str) -> list:
 
 
 def generate_voices(slides: list, audio_dir: str) -> list:
-    """Generate MP3 narration files for each slide using edge-tts."""
+    """Generate MP3 narration files for each slide using gTTS."""
     os.makedirs(audio_dir, exist_ok=True)
-    voice = os.environ.get("TTS_VOICE_EN", TTS_VOICE_DEFAULT)
-    rate = "-5%"
-
-    async def _synthesize_all():
-        paths = []
-        for i, slide_data in enumerate(slides, start=1):
-            narration = slide_data.get("narration", f"Slide {i}.")
-            out_path = os.path.join(audio_dir, f"audio_{i:02d}.mp3")
-            communicate = edge_tts.Communicate(narration, voice, rate=rate)
-            await communicate.save(out_path)
-            paths.append(out_path)
-            print(f"[generator] Audio generated: audio_{i:02d}.mp3")
-        return paths
-
-    return asyncio.run(_synthesize_all())
+    paths = []
+    for i, slide_data in enumerate(slides, start=1):
+        narration = slide_data.get("narration", f"Slide {i}.")
+        out_path = os.path.join(audio_dir, f"audio_{i:02d}.mp3")
+        tts = gTTS(text=narration, lang="en", tld="co.in")
+        tts.save(out_path)
+        paths.append(out_path)
+        print(f"[generator] Audio generated: audio_{i:02d}.mp3")
+    return paths
 
 
 # ---------------------------------------------------------------------------
@@ -729,9 +904,9 @@ def generate_full_video(topic: str, department: str, video_type: str) -> dict:
     print("[generator] Creating PowerPoint presentation …")
     ppt_path = make_ppt(script, department, work_dir)
 
-    # 3. Convert PPT to images
-    print("[generator] Converting PPT to images …")
-    images = ppt_to_images(ppt_path, img_dir)
+    # 3. Render slide images with Pillow
+    print("[generator] Rendering slide images …")
+    images = render_slide_images(script["slides"], department, img_dir)
 
     # 4. Generate voice narrations
     print("[generator] Generating TTS audio …")
