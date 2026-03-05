@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  cipethub-engine:
+    build: ./app
+    container_name: cipethub-engine
+    restart: unless-stopped
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-your_key_here}
+      - TTS_VOICE_EN=en-IN-PrabhatNeural
+      - TTS_VOICE_HI=hi-IN-MadhurNeural
+      - TZ=Asia/Kolkata
+    volumes:
+      - cipethub_videos:/videos
+    ports:
+      - "127.0.0.1:8899:8899"
+
+volumes:
+  cipethub_videos:
