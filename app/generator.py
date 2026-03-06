@@ -109,11 +109,11 @@ def ai_script(topic: str, department: str, video_type: str) -> dict:
 
 RULES:
 - Generate exactly 12 slides
-- Each slide: title (max 5 words), 3 bullet points (max 10 words each), narration (3 sentences, technical and specific), visual_description (detailed description of what diagram to draw)
+- Each slide: title (max 15 words), 13 bullet points (max 10 words each), narration (10 sentences, technical and specific), visual_description (detailed description of what diagram to draw)
 - Include REAL numbers: temperatures, pressures, dimensions, speeds where applicable
 - DO NOT repeat "CIPET", "CIPETHUB", "exam", "semester" — focus only on teaching the concept
 - Slide 1: Brief intro to topic (1 sentence: "Today we learn about {topic}.", then start teaching immediately)
-- Slides 2-11: Pure technical content with specific data
+- Slides 2-11: Pure technical content with specific data , also make it realistic, student should engage.
 - Slide 12: Quick summary + "Subscribe for more" (1 sentence max)
 - Narration style: Clear, direct, like an expert explaining to a colleague. NOT repetitive.
 - Each bullet point: max 10 words, short and punchy, specific facts or values
